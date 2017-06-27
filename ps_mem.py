@@ -158,7 +158,7 @@ def parse_options():
                         action='store_true',
                         help='Show by process rather than by program')
     parser.add_argument('-S', '--swap',
-                        dest='show_swap',
+                        dest='Show_swap',
                         action='store_true',
                         help='Show swap information')
     parser.add_argument('-w', '--watch',

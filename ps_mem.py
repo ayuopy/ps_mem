@@ -73,11 +73,12 @@
 # FreeBSD is supported if linprocfs is mounted at /compat/linux/proc/
 # FreeBSD 8.0 supports up to a level of Linux 2.6.16
 
-import getopt
+import argparse
 import time
 import errno
 import os
 import sys
+
 
 # The following exits cleanly on Ctrl-C or EPIPE
 # while treating other exceptions as before.
@@ -95,11 +96,12 @@ sys.excepthook = std_exceptions
 #   Define some global variables
 #
 
-PAGESIZE = os.sysconf("SC_PAGE_SIZE") / 1024 #KiB
+PAGESIZE = os.sysconf("SC_PAGE_SIZE") / 1024  # KiB
 our_pid = os.getpid()
 
 have_pss = 0
 have_swap_pss = 0
+
 
 class Proc:
     def __init__(self):
@@ -120,9 +122,9 @@ class Proc:
                 return open(self.path(*args), errors='ignore')
         except (IOError, OSError):
             val = sys.exc_info()[1]
-            if (val.errno == errno.ENOENT or # kernel thread or process gone
-                val.errno == errno.EPERM or
-                val.errno == errno.EACCES):
+            if (val.errno == errno.ENOENT or  # kernel thread or process gone
+                    val.errno == errno.EPERM or
+                    val.errno == errno.EACCES):
                 raise LookupError
             raise
 
@@ -133,83 +135,41 @@ proc = Proc()
 #   Functions
 #
 
+
 def parse_options():
-    try:
-        long_options = [
-            'split-args',
-            'help',
-            'total',
-            'discriminate-by-pid',
-            'swap'
-        ]
-        opts, args = getopt.getopt(sys.argv[1:], "shtdSp:w:", long_options)
-    except getopt.GetoptError:
-        sys.stderr.write(help())
-        sys.exit(3)
+    parser = argparse.ArgumentParser(description="Show core program memory usage")
+    parser.add_argument('-p', '--pid',
+                        metavar='<pid>',
+                        dest='pids_to_show',
+                        action='append',
+                        type=int,
+                        default=None,
+                        help='Show memory usage of specified PIDs')
+    parser.add_argument('-s', '--split-args',
+                        dest='split_args',
+                        action='store_true',
+                        help='Show and separate by, all command line arguments')
+    parser.add_argument('-t', '--total',
+                        dest='only_total',
+                        action='store_true',
+                        help='Show only the total value')
+    parser.add_argument('-d', '--discriminate-by-pid',
+                        dest='discriminate_by_pid',
+                        action='store_true',
+                        help='Show by process rather than by program')
+    parser.add_argument('-S', '--swap',
+                        dest='show_swap',
+                        action='store_true',
+                        help='Show swap information')
+    parser.add_argument('-w', '--watch',
+                        metavar='<N>',
+                        dest='watch',
+                        action='store',
+                        type=int,
+                        default=None,
+                        help='Measure and show process memory every N seconds')
 
-    if len(args):
-        sys.stderr.write("Extraneous arguments: %s\n" % args)
-        sys.exit(3)
-
-    # ps_mem.py options
-    split_args = False
-    pids_to_show = None
-    discriminate_by_pid = False
-    show_swap = False
-    watch = None
-    only_total = False
-
-    for o, a in opts:
-        if o in ('-s', '--split-args'):
-            split_args = True
-        if o in ('-t', '--total'):
-            only_total = True
-        if o in ('-d', '--discriminate-by-pid'):
-            discriminate_by_pid = True
-        if o in ('-S', '--swap'):
-            show_swap = True
-        if o in ('-h', '--help'):
-            sys.stdout.write(help())
-            sys.exit(0)
-        if o in ('-p',):
-            try:
-                pids_to_show = [int(x) for x in a.split(',')]
-            except:
-                sys.stderr.write(help())
-                sys.exit(3)
-        if o in ('-w',):
-            try:
-                watch = int(a)
-            except:
-                sys.stderr.write(help())
-                sys.exit(3)
-
-    return (
-        split_args,
-        pids_to_show,
-        watch,
-        only_total,
-        discriminate_by_pid,
-        show_swap
-    )
-
-
-def help():
-    help_msg = 'Usage: ps_mem [OPTION]...\n' \
-        'Show program core memory usage\n' \
-        '\n' \
-        '  -h, -help                   Show this help\n' \
-        '  -p <pid>[,pid2,...pidN]     Only show memory usage PIDs in the '\
-        'specified list\n' \
-        '  -s, --split-args            Show and separate by, all command line'\
-        ' arguments\n' \
-        '  -t, --total                 Show only the total value\n' \
-        '  -d, --discriminate-by-pid   Show by process rather than by program\n' \
-        '  -S, --swap                  Show swap information\n' \
-        '  -w <N>                      Measure and show process memory every'\
-        ' N seconds\n'
-
-    return help_msg
+    return parser.parse_args()
 
 
 # (major,minor,release)
@@ -230,17 +190,16 @@ def kernel_ver():
     return (int(kv[0]), int(kv[1]), int(kv[2]))
 
 
-#return Private,Shared
-#Note shared is always a subset of rss (trs is not always)
+# return Private,Shared
+# Note shared is always a subset of rss (trs is not always)
 def getMemStats(pid):
     global have_pss
     global have_swap_pss
-    mem_id = pid #unique
+    mem_id = pid  # unique
     Private_lines = []
     Shared_lines = []
     Pss_lines = []
-    Rss = (int(proc.open(pid, 'statm').readline().split()[1])
-           * PAGESIZE)
+    Rss = (int(proc.open(pid, 'statm').readline().split()[1]) * PAGESIZE)
     Swap_lines = []
     Swap_pss_lines = []
 
@@ -267,10 +226,10 @@ def getMemStats(pid):
                 Swap_pss_lines.append(line)
         Shared = sum([int(line.split()[1]) for line in Shared_lines])
         Private = sum([int(line.split()[1]) for line in Private_lines])
-        #Note Shared + Private = Rss above
-        #The Rss in smaps includes video card mem etc.
+        # Note Shared + Private = Rss above
+        # The Rss in smaps includes video card mem etc.
         if have_pss:
-            pss_adjust = 0.5 # add 0.5KiB as this avg error due to truncation
+            pss_adjust = 0.5  # add 0.5KiB as this avg error due to truncation
             Pss = sum([float(line.split()[1])+pss_adjust for line in Pss_lines])
             Shared = Pss - Private
         # Note that Swap = Private swap + Shared swap.
@@ -279,8 +238,8 @@ def getMemStats(pid):
             # The kernel supports SwapPss, that shows proportional swap share.
             # Note that Swap - SwapPss is not Private Swap.
             Swap_pss = sum([int(line.split()[1]) for line in Swap_pss_lines])
-    elif (2,6,1) <= kernel_ver() <= (2,6,9):
-        Shared = 0 #lots of overestimation, but what can we do?
+    elif (2, 6, 1) <= kernel_ver() <= (2, 6, 9):
+        Shared = 0  # lots of overestimation, but what can we do?
         Private = Rss
     else:
         Shared = int(proc.open(pid, 'statm').readline().split()[2])
@@ -302,9 +261,9 @@ def getCmdName(pid, split_args, discriminate_by_pid):
         path = path.split('\0')[0]
     except OSError:
         val = sys.exc_info()[1]
-        if (val.errno == errno.ENOENT or # either kernel thread or process gone
-            val.errno == errno.EPERM or
-            val.errno == errno.EACCES):
+        if (val.errno == errno.ENOENT or  # either kernel thread or process gone
+                val.errno == errno.EPERM or
+                val.errno == errno.EACCES):
             raise LookupError
         raise
 
@@ -315,9 +274,9 @@ def getCmdName(pid, split_args, discriminate_by_pid):
         if os.path.exists(path):
             path += " [updated]"
         else:
-            #The path could be have prelink stuff so try cmdline
-            #which might have the full path present. This helped for:
-            #/usr/libexec/notification-area-applet.#prelink#.fX7LCT (deleted)
+            # The path could be have prelink stuff so try cmdline
+            # which might have the full path present. This helped for:
+            # /usr/libexec/notification-area-applet.#prelink#.fX7LCT (deleted)
             if os.path.exists(cmdline[0]):
                 path = cmdline[0] + " [updated]"
             else:
@@ -325,10 +284,10 @@ def getCmdName(pid, split_args, discriminate_by_pid):
     exe = os.path.basename(path)
     cmd = proc.open(pid, 'status').readline()[6:-1]
     if exe.startswith(cmd):
-        cmd = exe #show non truncated version
-        #Note because we show the non truncated name
-        #one can have separated programs as follows:
-        #584.0 KiB +   1.0 MiB =   1.6 MiB    mozilla-thunder (exe -> bash)
+        cmd = exe  # show non truncated version
+        # Note because we show the non truncated name
+        # one can have separated programs as follows:
+        # 584.0 KiB +   1.0 MiB =   1.6 MiB    mozilla-thunder (exe -> bash)
         # 56.0 MiB +  22.2 MiB =  78.2 MiB    mozilla-thunderbird-bin
     if sys.version_info >= (3,):
         cmd = cmd.encode(errors='replace').decode()
@@ -337,12 +296,12 @@ def getCmdName(pid, split_args, discriminate_by_pid):
     return cmd
 
 
-#The following matches "du -h" output
-#see also human.py
+# The following matches "du -h" output
+# see also human.py
 def human(num, power="Ki", units=None):
     if units is None:
         powers = ["Ki", "Mi", "Gi", "Ti"]
-        while num >= 1000: #4 digits
+        while num >= 1000:  # 4 digits
             num /= 1024.0
             power = powers[powers.index(power)+1]
         return "%.1f %sB" % (num, power)
@@ -356,26 +315,27 @@ def cmd_with_count(cmd, count):
     else:
         return cmd
 
-#Warn of possible inaccuracies
-#2 = accurate & can total
-#1 = accurate only considering each process in isolation
-#0 = some shared mem not reported
-#-1= all shared mem not reported
+
+# Warn of possible inaccuracies
+# 2 = accurate & can total
+# 1 = accurate only considering each process in isolation
+# 0 = some shared mem not reported
+# -1= all shared mem not reported
 def shared_val_accuracy():
     """http://wiki.apache.org/spamassassin/TopSharedMemoryBug"""
     kv = kernel_ver()
     pid = os.getpid()
-    if kv[:2] == (2,4):
+    if kv[:2] == (2, 4):
         if proc.open('meminfo').read().find("Inact_") == -1:
             return 1
         return 0
-    elif kv[:2] == (2,6):
+    elif kv[:2] == (2, 6):
         if os.path.exists(proc.path(pid, 'smaps')):
-            if proc.open(pid, 'smaps').read().find("Pss:")!=-1:
+            if proc.open(pid, 'smaps').read().find("Pss:") != -1:
                 return 2
             else:
                 return 1
-        if (2,6,1) <= kv <= (2,6,9):
+        if (2, 6, 1) <= kv <= (2, 6, 9):
             return -1
         return 0
     elif kv[0] > 2 and os.path.exists(proc.path(pid, 'smaps')):
@@ -383,8 +343,9 @@ def shared_val_accuracy():
     else:
         return 1
 
-def show_shared_val_accuracy( possible_inacc, only_total=False ):
-    level = ("Warning","Error")[only_total]
+
+def show_shared_val_accuracy(possible_inacc, only_total=False):
+    level = ("Warning", "Error")[only_total]
     if possible_inacc == -1:
         sys.stderr.write(
          "%s: Shared memory is not reported by this system.\n" % level
@@ -433,19 +394,19 @@ def get_memory_usage(pids_to_show, split_args, discriminate_by_pid,
         try:
             cmd = getCmdName(pid, split_args, discriminate_by_pid)
         except LookupError:
-            #operation not permitted
-            #kernel threads don't have exe links or
-            #process gone
+            # operation not permitted
+            # kernel threads don't have exe links or
+            # process gone
             continue
 
         try:
             private, shared, mem_id, swap, swap_pss = getMemStats(pid)
         except RuntimeError:
-            continue #process gone
+            continue  # process gone
         if shareds.get(cmd):
-            if have_pss: #add shared portion of PSS together
+            if have_pss:  # add shared portion of PSS together
                 shareds[cmd] += shared
-            elif shareds[cmd] < shared: #just take largest shared val
+            elif shareds[cmd] < shared:  # just take largest shared val
                 shareds[cmd] = shared
         else:
             shareds[cmd] = shared
@@ -486,7 +447,7 @@ def get_memory_usage(pids_to_show, split_args, discriminate_by_pid,
         if have_swap_pss:
             total_shared_swap += shared_swaps[cmd]
 
-    sorted_cmds = sorted(cmds.items(), key=lambda x:x[1])
+    sorted_cmds = sorted(cmds.items(), key=lambda x: x[1])
     sorted_cmds = [x for x in sorted_cmds if x[1]]
 
     return sorted_cmds, shareds, count, total, swaps, shared_swaps, \
@@ -558,32 +519,32 @@ def verify_environment(pids_to_show):
         else:
             raise
 
+
 def main():
-    split_args, pids_to_show, watch, only_total, discriminate_by_pid, \
-    show_swap = parse_options()
+    args = parse_options()
 
-    verify_environment(pids_to_show)
+    verify_environment(args.pids_to_show)
 
-    if not only_total:
-        print_header(show_swap, discriminate_by_pid)
+    if not args.only_total:
+        print_header(args.show_swap, args.discriminate_by_pid)
 
-    if watch is not None:
+    if args.watch is not None:
         try:
             sorted_cmds = True
             while sorted_cmds:
                 sorted_cmds, shareds, count, total, swaps, shared_swaps, \
                     total_swap, total_shared_swap = \
-                    get_memory_usage(pids_to_show, split_args,
-                                     discriminate_by_pid)
-                if only_total and have_pss:
+                    get_memory_usage(args.pids_to_show, args.split_args,
+                                     args.discriminate_by_pid)
+                if args.only_total and have_pss:
                     sys.stdout.write(human(total, units=1)+'\n')
-                elif not only_total:
+                elif not args.only_total:
                     print_memory_usage(sorted_cmds, shareds, count, total,
                                        swaps, total_swap, shared_swaps,
-                                       total_shared_swap, show_swap)
+                                       total_shared_swap, args.show_swap)
 
                 sys.stdout.flush()
-                time.sleep(watch)
+                time.sleep(args.watch)
             else:
                 sys.stdout.write('Process does not exist anymore.\n')
         except KeyboardInterrupt:
@@ -591,14 +552,15 @@ def main():
     else:
         # This is the default behavior
         sorted_cmds, shareds, count, total, swaps, shared_swaps, total_swap, \
-            total_shared_swap = get_memory_usage(pids_to_show, split_args,
-                                                 discriminate_by_pid)
-        if only_total and have_pss:
+            total_shared_swap = get_memory_usage(args.pids_to_show,
+                                                 args.split_args,
+                                                 args.discriminate_by_pid)
+        if args.only_total and have_pss:
             sys.stdout.write(human(total, units=1)+'\n')
-        elif not only_total:
+        elif not args.only_total:
             print_memory_usage(sorted_cmds, shareds, count, total, swaps,
                                total_swap, shared_swaps, total_shared_swap,
-                               show_swap)
+                               args.show_swap)
 
     # We must close explicitly, so that any EPIPE exception
     # is handled by our excepthook, rather than the default
@@ -606,6 +568,7 @@ def main():
     sys.stdout.close()
 
     vm_accuracy = shared_val_accuracy()
-    show_shared_val_accuracy( vm_accuracy, only_total )
+    show_shared_val_accuracy(vm_accuracy, args.only_total)
 
-if __name__ == '__main__': main()
+if __name__ == '__main__':
+    main()
